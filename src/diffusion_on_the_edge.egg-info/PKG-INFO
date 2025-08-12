@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: diffusion-on-the-edge
+Version: 0.1.0
+Summary: Project for exploring maximum entropy diffusion models
+Author: UrjalaCoder
+Dynamic: author
+Dynamic: summary

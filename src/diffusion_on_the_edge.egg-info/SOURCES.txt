@@ -1,0 +1,9 @@
+setup.py
+src/diffusion_on_the_edge/__init__.py
+src/diffusion_on_the_edge/model.py
+src/diffusion_on_the_edge/stochastics.py
+src/diffusion_on_the_edge/visualize.py
+src/diffusion_on_the_edge.egg-info/PKG-INFO
+src/diffusion_on_the_edge.egg-info/SOURCES.txt
+src/diffusion_on_the_edge.egg-info/dependency_links.txt
+src/diffusion_on_the_edge.egg-info/top_level.txt
