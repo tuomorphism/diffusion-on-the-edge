@@ -21,7 +21,7 @@ def plot_multiple_1d_trajectories(data, time=None, labels=None, title='Multiple 
 
     for i in range(N):
         lbl = labels[i] if labels is not None else f"Trajectory {i}"
-        sns.lineplot(x=time, y=data[:, i], label=lbl, linewidth=1.5, ax = ax)
+        sns.lineplot(x=time, y=data[:, i], label=lbl, linewidth=1.5, ax = ax).set(xlim=(time[0], time[-1]))
 
     plt.xlabel("Time")
     plt.ylabel("x(t)")
