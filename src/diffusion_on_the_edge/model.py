@@ -1,83 +1,37 @@
-import math
-
-import torch
-import torch.nn as nn
+import math, torch, torch.nn as nn
 
 class SinusoidalTimeEmbedding(nn.Module):
-    """
-    NeRF-style sinusoidal embedding for scalar timesteps t in [0,1] (or any range).
-    Returns [B, emb_dim].
-    """
     def __init__(self, emb_dim: int = 64, max_freq: float = 1000.0):
         super().__init__()
         assert emb_dim % 2 == 0, "emb_dim must be even"
         half = emb_dim // 2
-        # Frequencies geometrically spaced in [1, max_freq]
-        self.register_buffer(
-            "freqs",
-            torch.exp(torch.linspace(0, math.log(max_freq), steps=half))
-        )
+        self.register_buffer("freqs", torch.exp(torch.linspace(0, math.log(max_freq), steps=half)))
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        t: shape [B] or [B,1] or [B, ...] (we'll reduce to [B,1]).
-        """
-        if t.dim() == 1:
-            t = t.unsqueeze(-1)
-        if t.size(-1) != 1:
-            # If someone expanded t to match x (e.g., [B, D]), just take a representative scalar per-item.
-            t = t.mean(dim=-1, keepdim=True)
-
-        # [B, 1] * [half] -> [B, half]
-        angles = t * self.freqs  # broadcast
-        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
-        return emb  # [B, emb_dim]
-
+        if t.dim() == 1: t = t.unsqueeze(-1)
+        if t.size(-1) != 1: t = t.mean(dim=-1, keepdim=True)
+        angles = t * self.freqs  # [B,half]
+        return torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)  # [B,emb_dim]
 
 class SimpleScoreNet(nn.Module):
-    """
-    Simple MLP score network:
-      - Concatenates input x with a sinusoidal time embedding of t.
-      - Produces a score vector with the same dimension as x.
-    """
-    def __init__(
-        self,
-        input_dimension: int,
-        layer_count: int = 2,
-        hidden_dim: int = 512,
-        time_emb_dim: int = 64,
-    ):
+    def __init__(self, input_dimension: int, layer_count: int = 2, hidden_dim: int = 1024, time_emb_dim: int = 64):
         super().__init__()
-        self.input_dimension = input_dimension
         self.time_emb = SinusoidalTimeEmbedding(time_emb_dim)
-
         in_dim = input_dimension + time_emb_dim
 
         layers = []
-        # input -> first hidden
-        layers.append(nn.Linear(in_dim, hidden_dim))
-        layers.append(nn.ReLU(inplace=True))
-
-        # hidden stack
+        layers += [nn.Linear(in_dim, hidden_dim), nn.SiLU(inplace=True) ]
         for _ in range(max(0, layer_count - 1)):
-            layers.append(nn.Linear(hidden_dim, hidden_dim))
-            layers.append(nn.ReLU(inplace=True))
+            layers += [nn.Linear(hidden_dim, hidden_dim), nn.SiLU(inplace=True) ]
+        out = nn.Linear(hidden_dim, input_dimension)
 
-        # final projection to score dim
-        layers.append(nn.Linear(hidden_dim, input_dimension))
-
+        nn.init.zeros_(out.weight)
+        nn.init.zeros_(out.bias)
+        
+        layers += [out]
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        x: [B, D]
-        t: [B] or [B, 1] or [B, D] (if expanded); we reduce/encode to [B, time_emb_dim]
-        """
-        if x.dim() != 2:
-            # Flatten everything but batch dim so we stay general.
-            x = x.view(x.size(0), -1)
-
-        temb = self.time_emb(t)  # [B, time_emb_dim]
-        inp = torch.cat([x, temb], dim=-1)
-        return self.net(inp)  # [B, D]
-
+        if x.dim() != 2: x = x.view(x.size(0), -1)
+        temb = self.time_emb(t)
+        return self.net(torch.cat([x, temb], dim=-1))

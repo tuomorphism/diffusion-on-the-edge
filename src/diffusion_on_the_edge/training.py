@@ -35,7 +35,7 @@ def train_scorenet(
         for batch in pbar:
             optimizer.zero_grad()
 
-            x = batch['x0']
+            x = batch['xt']
             t = batch['t']
             var = batch['var'].to(device)
             omega = torch.clamp(var, min=1e-6)
