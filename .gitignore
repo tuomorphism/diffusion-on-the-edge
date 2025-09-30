@@ -4,3 +4,4 @@ __pycache__/
 *.csv
 *.zip
 .DS_Store
+src/diffusion_on_the_edge.egg-info

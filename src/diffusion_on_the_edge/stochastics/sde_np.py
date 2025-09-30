@@ -8,16 +8,6 @@ DriftFnNP = Callable[[Array, float], Array]
 DiffusionFnNP = Callable[[float], float]
 ScoreFnNP = Callable[[Array, float], Array]
 
-@dataclass
-class TimeGrid:
-    t0: float
-    t1: float
-    N: int
-
-    def grid(self) -> Array:
-        return np.linspace(self.t0, self.t1, self.N + 1, dtype=float)
-
-
 def improved_euler_sde_np(
     x0: Array,
     grid: TimeGrid,
@@ -101,7 +91,6 @@ def prob_flow_ode_step_np(x: Array, t: float, dt: float, f: DriftFnNP, g: Diffus
     """One Heun step for probability-flow ODE: dX = [f - 0.5 g^2 score] dt.
     Useful for quick deterministic sampling when you don't need density.
     """
-    g2 = g(t) ** 2
     drift = lambda xx, tt: f(xx, tt) - 0.5 * g(tt) ** 2 * score(xx, tt)
     x_pred = x + dt * drift(x, t)
     x_next = x + 0.5 * dt * (drift(x, t) + drift(x_pred, t + dt))
