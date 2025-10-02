@@ -41,13 +41,11 @@ class TimeGrid:
             raise IndexError("k must be in [0, N-2]")
         return float(ts[k]), float(ts[k + 1] - ts[k])
 
-    # ---------- Torch API (optional) ----------
     def times_torch(self, device=None, dtype=None):
         """Return times as a torch tensor of shape (N,)."""
         if not _TORCH_AVAILABLE or torch == None:
             raise RuntimeError("PyTorch not available; install torch to use times_torch().")
         
-        # torch.linspace keeps endpoint by default
         step = (self.t1 - self.t0) / self.N
         return torch.arange(self.t0, self.t1, step=step, device=device, dtype=dtype)
 

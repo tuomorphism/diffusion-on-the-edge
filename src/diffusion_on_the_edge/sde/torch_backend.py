@@ -1,17 +1,11 @@
 from __future__ import annotations
-from typing import Callable as _Callable, Optional, Literal
+from typing import Callable as Callable, Optional, Literal
 import numpy as np
 import torch
 
-from ..core.types import Tensor, TorchProcess
+from ..core.types import Tensor, TorchProcess, DriftFnTorch, DiffusionFnTorch, ScoreFnTorch
 from ..core.grid import TimeGrid
 from ..core.utils import ensure_batch_torch, diag_noise_torch
-
-# ---- Callable types (for reverse-PC / PF-ODE, which use functions not a process)
-DriftFnTorch  = _Callable[[Tensor, Tensor], Tensor]      # f(x, t_tensor)->(B,D)
-ScoreFnTorch  = _Callable[[Tensor, Tensor], Tensor]      # score(x, t_tensor)->(B,D)
-DiffusionFnTorch = _Callable[[float], float | Tensor]    # g(t_scalar)->scalar or (D,)
-
 
 def _g_square(x: Tensor, g_val: float | Tensor) -> Tensor:
     """Return g^2 with shape broadcastable to x (B,D)."""
@@ -28,8 +22,8 @@ def euler_maruyama_step_torch(
 ) -> Tensor:
     """One EM step for dX = f dt + g dW with diagonal g."""
     t_scalar = float(t_tensor[0, 0].item())
-    f0 = proc.drift_torch(x, t_tensor)                   # (B,D)
-    g0 = proc.diffusion_torch(t_scalar)                  # scalar or (D,)
+    f0 = proc.drift(x, t_tensor)                   # (B,D)
+    g0 = proc.diffusion(t_scalar)                  # scalar or (D,)
     x = x + f0 * dt + diag_noise_torch(x, g0, np.sqrt(dt))
     return x
 
@@ -42,11 +36,11 @@ def heun_sde_step_torch(
 ) -> Tensor:
     """Stochastic Heun (improved Euler) with shared ΔW."""
     t_scalar = float(t_tensor[0, 0].item())
-    g0 = proc.diffusion_torch(t_scalar)
+    g0 = proc.diffusion(t_scalar)
     dW = diag_noise_torch(x, g0, np.sqrt(dt))            # shared dW
-    f0 = proc.drift_torch(x, t_tensor)
+    f0 = proc.drift(x, t_tensor)
     x_pred = x + f0 * dt + dW
-    f1 = proc.drift_torch(x_pred, t_tensor + dt)
+    f1 = proc.drift(x_pred, t_tensor + dt)
     x = x + 0.5 * (f0 + f1) * dt + dW
     return x
 
@@ -78,7 +72,7 @@ def simulate_sde_torch(
     for k in range(ts.numel() - 1):
         dt = float((ts[k + 1] - ts[k]).item())
         if use_exact:
-            mean, std = proc.transition_mean_std_torch(x, dt, float(ts[k].item()))  # type: ignore[attr-defined]
+            mean, std = proc.transition_mean_std(x, dt)
             x = mean + torch.randn_like(x) * std
         elif method == "em":
             x = euler_maruyama_step_torch(proc, x, t, dt)

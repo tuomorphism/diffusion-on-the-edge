@@ -7,20 +7,10 @@ from numpy.typing import NDArray
 
 from ..core.grid import TimeGrid
 from ..core.utils import ensure_batch_np, diag_noise_np
-from ..core.types import NumpyProcess
+from ..core.types import NumpyProcess, Array, DriftFnNP, DiffusionFnNP, ScoreFnNP
 
-# Base array type for NumPy backend
-Array = NDArray[np.floating]
-
-# Function signatures
-DriftFnNP = Callable[[Array, float], Array]          # f(x, t) -> (..., D)
-DiffusionFnNP = Callable[[float], Array | float]     # g(t) -> scalar or (D,)
-ScoreFnNP = Callable[[Array, float], Array]          # score(x, t) -> (..., D)
 
 __all__ = [
-    "DriftFnNP",
-    "DiffusionFnNP",
-    "ScoreFnNP",
     "improved_euler_sde_np",
     "reverse_pc_sampler_np",
     "prob_flow_ode_step_np",
@@ -179,7 +169,7 @@ def simulate_sde_np(
     xs = np.empty((ts.size, B, D), dtype=float)
     xs[0] = x
 
-    use_exact = method == "exact_if_available" and hasattr(proc, "transition_mean_std_np")
+    use_exact = method == "exact_if_available" and hasattr(proc, "transition_mean_std")
 
     for k in range(ts.size - 1):
         t0 = float(ts[k])
@@ -187,18 +177,18 @@ def simulate_sde_np(
         sqrt_dt = np.sqrt(dt)
 
         if use_exact:
-            m, s = proc.transition_mean_std_np(x, dt, t0)  # type: ignore[attr-defined]
+            m, s = proc.transition_mean_std(x, dt)
             x = m + np.random.normal(size=x.shape) * s
         elif method == "em":
-            f0 = proc.drift_np(x, t0)
-            g0 = proc.diffusion_np(t0)
+            f0 = proc.drift(x, t0)
+            g0 = proc.diffusion(t0)
             x = x + f0 * dt + diag_noise_np((B, D), g0, sqrt_dt)
-        else:  # heun
-            f0 = proc.drift_np(x, t0)
-            g0 = proc.diffusion_np(t0)
-            dW = diag_noise_np((B, D), g0, sqrt_dt)  # shared ΔW
+        else:
+            f0 = proc.drift(x, t0)
+            g0 = proc.diffusion(t0)
+            dW = diag_noise_np((B, D), g0, sqrt_dt)
             x_pred = x + f0 * dt + dW
-            f1 = proc.drift_np(x_pred, float(ts[k + 1]))
+            f1 = proc.drift(x_pred, float(ts[k + 1]))
             x = x + 0.5 * (f0 + f1) * dt + dW
 
         xs[k + 1] = x
