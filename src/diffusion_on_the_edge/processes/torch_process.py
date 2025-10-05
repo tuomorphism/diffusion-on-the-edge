@@ -23,15 +23,17 @@ class OUTorch(TorchProcess):
         if torch.any(self.theta <= 0): raise ValueError("theta must be > 0")
         if torch.any(self.sigma < 0):  raise ValueError("sigma must be >= 0")
 
-    def drift_torch(self, x: Tensor, _: Tensor) -> Tensor:
+    def drift(self, x: Tensor, _: Tensor) -> Tensor:
         return self.theta.view(1, -1) * (self.mu.view(1, -1) - x)
 
-    def diffusion_torch(self, _: float) -> Tensor:
+    def diffusion(self, _: float) -> Tensor:
         return self.sigma 
 
-    def transition_mean_std(self, x: Tensor, dt: float) -> tuple[Tensor, Tensor]:
-        e = torch.exp(-self.theta * dt)
-        mean = self.mu + (x - self.mu) * e.view(1, -1)
-        var  = (self.sigma**2) * (1.0 - e**2) / (2.0 * self.theta)
-        std  = torch.sqrt(var).view(1, -1)
+    def transition_mean_std(self, x: Tensor, t: Tensor) -> tuple[Tensor, Tensor]:
+        e = torch.exp(-t[..., None] * self.theta)  # broadcasts theta over last dim
+        denom = 2.0 * torch.clamp(self.theta, min=1e-12)
+        var   = (self.sigma**2) * (1.0 - e**2) / denom
+        std   = torch.sqrt(torch.clamp(var, min=0.0))
+        mean = self.mu + (x - self.mu) * e
         return mean, std
+ 

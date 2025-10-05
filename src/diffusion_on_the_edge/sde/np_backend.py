@@ -1,13 +1,11 @@
-# diffusion_on_the_edge/sde/np_backend.py
 from __future__ import annotations
-
-from typing import Callable, Optional, Tuple
 import numpy as np
-from numpy.typing import NDArray
+
+from typing import Optional, Tuple
 
 from ..core.grid import TimeGrid
 from ..core.utils import ensure_batch_np, diag_noise_np
-from ..core.types import NumpyProcess, Array, DriftFnNP, DiffusionFnNP, ScoreFnNP
+from ..core.types import NumpyProcess, Array, DriftFnNP, DiffusionFnNP, ScoreFnNP, IntegrationMethod
 
 
 __all__ = [
@@ -160,7 +158,7 @@ def simulate_sde_np(
     x0: Array,
     grid: TimeGrid,
     *,
-    method: str = "heun",   # "em" | "heun" | "exact_if_available"
+    method: IntegrationMethod = "heun", 
 ) -> tuple[Array, Array]:
     """Simulate a NumpyProcess on a TimeGrid using chosen method."""
     ts = grid.times()

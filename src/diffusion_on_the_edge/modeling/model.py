@@ -20,9 +20,9 @@ class SimpleScoreNet(nn.Module):
         in_dim = input_dimension + time_emb_dim
 
         layers = []
-        layers += [nn.Linear(in_dim, hidden_dim), nn.SiLU(inplace=True) ]
+        layers += [nn.Linear(in_dim, hidden_dim), nn.ReLU(inplace=True) ]
         for _ in range(max(0, layer_count - 1)):
-            layers += [nn.Linear(hidden_dim, hidden_dim), nn.SiLU(inplace=True) ]
+            layers += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU(inplace=True) ]
         out = nn.Linear(hidden_dim, input_dimension)
 
         nn.init.zeros_(out.weight)

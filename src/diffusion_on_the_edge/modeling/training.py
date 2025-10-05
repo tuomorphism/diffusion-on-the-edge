@@ -39,7 +39,7 @@ def train_scorenet(
             t = batch['t']
             var = batch['var'].to(device)
             omega = torch.clamp(var, min=1e-6)
-            omega = omega / (omega.mean() + 1e-12)
+            omega = omega / (omega.mean() + 1e-6)
 
             true_score = batch['score']
 

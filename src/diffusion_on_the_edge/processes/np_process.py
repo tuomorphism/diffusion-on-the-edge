@@ -32,7 +32,7 @@ class OUNumpy(NumpyProcess):
     def diffusion(self, _: float) -> Array:
         return self.sigma
 
-    def transition_mean_std_np(self, x: Array, dt: float, _: float) -> tuple[Array, Array]:
+    def transition_mean_std(self, x: Array, dt: float) -> tuple[Array, Array]:
         e = np.exp(-self.theta * dt)
         mean = self.mu + (x[..., -self.dim:] - self.mu) * e
         var  = (self.sigma**2) * (1.0 - e**2) / (2.0 * self.theta)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Protocol, Callable
+from typing import Protocol, Callable, Literal
 from numpy.typing import NDArray
 import torch
 import numpy as np
@@ -17,6 +17,9 @@ ScoreFnTorch  = Callable[[Tensor, Tensor], Tensor]
 # Additional type for score function, s(x, t)
 ScoreFnNP = Callable[[Array, float], Array]
 DiffusionFnTorch = Callable[[float], float | Tensor]
+
+# Different stochastic integration methods
+IntegrationMethod = Literal['em', 'heun', 'exact']
 
 # Defining some process Protocols for implementation classes to use.
 # These reflect the general diffusion process with drift and diffusion (noise) terms.
@@ -41,4 +44,4 @@ class TorchProcess(Protocol):
     drift: DriftFnTorch
     diffusion: DiffusionFnTorch
 
-    def transition_mean_std(self, x: Tensor, t: float) -> tuple[Tensor, Tensor]: ...
+    def transition_mean_std(self, x: Tensor, t: Tensor) -> tuple[Tensor, Tensor]: ...

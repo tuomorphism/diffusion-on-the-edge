@@ -3,7 +3,7 @@ from typing import Callable as Callable, Optional, Literal
 import numpy as np
 import torch
 
-from ..core.types import Tensor, TorchProcess, DriftFnTorch, DiffusionFnTorch, ScoreFnTorch
+from ..core.types import Tensor, TorchProcess, DriftFnTorch, DiffusionFnTorch, ScoreFnTorch, IntegrationMethod
 from ..core.grid import TimeGrid
 from ..core.utils import ensure_batch_torch, diag_noise_torch
 
@@ -50,13 +50,13 @@ def simulate_sde_torch(
     x0: Tensor,
     grid: TimeGrid,
     *,
-    method: Literal["em", "heun", "exact_if_available"] = "heun",
+    method: IntegrationMethod = "heun",
 ) -> tuple[Tensor, Tensor]:
     """Simulate any TorchProcess on a TimeGrid (t0→t1). Returns (xs, ts).
 
     - method="em"  : Euler–Maruyama
     - method="heun": stochastic Heun (shared ΔW)
-    - method="exact_if_available": uses proc.transition_mean_std_torch if defined, else Heun
+    - method="exact": exact method
     """
     x, was_scalar = ensure_batch_torch(x0)
     B, D = x.shape
@@ -67,11 +67,9 @@ def simulate_sde_torch(
     xs[0] = x
     t = ts[0].expand(B, 1).clone()
 
-    use_exact = method == "exact_if_available" and hasattr(proc, "transition_mean_std_torch")
-
     for k in range(ts.numel() - 1):
         dt = float((ts[k + 1] - ts[k]).item())
-        if use_exact:
+        if method == "exact":
             mean, std = proc.transition_mean_std(x, dt)
             x = mean + torch.randn_like(x) * std
         elif method == "em":
@@ -86,9 +84,8 @@ def simulate_sde_torch(
 @torch.no_grad()
 def reverse_pc_sampler_torch(
     x_T: Tensor,
+    process: TorchProcess,
     score_model: ScoreFnTorch,
-    f_fn: DriftFnTorch,
-    g_fn: DiffusionFnTorch,
     grid: TimeGrid,
     snr: float = 0.15,
     eps_corrector: Optional[float] = None,
@@ -97,6 +94,8 @@ def reverse_pc_sampler_torch(
     x, was_scalar = ensure_batch_torch(x_T)
     B, D = x.shape
     device, dtype = x.device, x.dtype
+    f_fn = process.drift
+    g_fn = process.diffusion
 
     ts  = grid.times_torch(device=device, dtype=dtype)   # (N,)
     dts = ts[1:] - ts[:-1]                               # (N-1,)
