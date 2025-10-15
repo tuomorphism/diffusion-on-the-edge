@@ -10,12 +10,13 @@ class TrainConfig:
     epochs: int = 10
     lr: float = 1E-4
     weight_decay: float = 0.0
-    device: str = "cpu" # by default, run on CPU
+    device: str = "cpu" 
 
 def train_scorenet(
     model: SimpleScoreNet,
     dataloader: torch.utils.data.DataLoader,
     cfg: TrainConfig = TrainConfig(),
+    verbose = False,
 ):
     """
     Train the SimpleScoreNet using MSE between predicted and true score values.
@@ -61,8 +62,7 @@ def train_scorenet(
 
         epoch_loss = running_loss / max(1, n_samples)
         history.append(epoch_loss)
-        print(f"Epoch {epoch+1}: avg loss = {epoch_loss:.6f}")
+        if verbose:
+            print(f"Epoch {epoch+1}: avg loss = {epoch_loss:.6f}")
 
-    result = {"model": model, "losses": history}
-
-    return result
+    return {'model': model, 'losses': history}

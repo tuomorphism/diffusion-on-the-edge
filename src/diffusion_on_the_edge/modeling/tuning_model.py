@@ -30,15 +30,15 @@ class ResidualScore(nn.Module):
         return self.delta(inp)
 
 
-def build_teacher_student(pretrained_score_model: nn.Module, hidden_size = 128, device=None):
+def build_teacher_student(pretrained_score_model: nn.Module, hidden_size = 128, d = 3, device=None):
     """
     Returns (teacher, student).
     - teacher: frozen copy (anchor/trust region)
     - student: trainable residual over the same base
     """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    teacher = ResidualScore(pretrained_score_model, d=3, hidden=hidden_size).to(device)
-    student = ResidualScore(pretrained_score_model, d=3, hidden=hidden_size).to(device)
+    teacher = ResidualScore(pretrained_score_model, d=d, hidden=hidden_size).to(device)
+    student = ResidualScore(pretrained_score_model, d=d, hidden=hidden_size).to(device)
 
     student.load_state_dict(teacher.state_dict())
     for p in teacher.parameters():

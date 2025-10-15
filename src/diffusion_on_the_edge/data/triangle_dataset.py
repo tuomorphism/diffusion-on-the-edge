@@ -26,6 +26,7 @@ class DatasetOptions:
     include_geometry: bool = True  # area, perimeter, angles
     include_normalized_sides: bool = True  # (a/c, b/c) with c = longest side
     include_planar_embedding: bool = True  # (x, y) with base c on x-axis
+    include_perimeter_normalized_sides: bool = True # (a/l, b/l, c/l) with l = a+b+c
 
 
 def _get_rng(seed: Optional[int]) -> np.random.Generator:
@@ -54,19 +55,6 @@ def sample_valid_triangle_sides(
 ) -> np.ndarray:
     """
     Sample valid triangle side lengths (a, b, c) in (0, 1] satisfying the triangle inequality.
-
-    Parameters
-    ----------
-    n_samples : int
-        Number of valid triangles to return.
-    seed : int | None
-        Random seed for reproducibility.
-    sort_sides : bool
-        If True, returns sides sorted ascending so that c is the largest side.
-    batch_size : int | None
-        How many triplets to draw per batch (defaults to 5 * n_samples, capped at 1_000_000).
-    max_batches : int
-        Safety cap to avoid infinite loops in pathological settings.
 
     Returns
     -------
@@ -103,17 +91,6 @@ def classify_triangle_sides(
 ) -> Union[SideType, np.ndarray]:
     """
     Classify by side lengths: 'equilateral', 'isosceles', or 'scalene'.
-
-    Parameters
-    ----------
-    sides : (3,) or (N,3) array-like
-        Triangle side lengths. If not sorted, classification is still correct.
-    tol : float
-        Absolute tolerance for equality of sides.
-
-    Returns
-    -------
-    side_type : str or (N,) ndarray[str]
     """
     arr = np.asarray(sides, dtype=float)
     if arr.ndim == 1:
@@ -158,15 +135,6 @@ def triangle_angles_degrees(
 ) -> Union[Tuple[float, float, float], np.ndarray]:
     """
     Compute interior angles (degrees) from side lengths via the law of cosines.
-
-    Parameters
-    ----------
-    sides : (3,) or (N,3) array-like
-
-    Returns
-    -------
-    angles_deg : (3,) or (N,3) ndarray
-        Angles (A, B, C) opposite (a, b, c) respectively.
     """
     arr = np.asarray(sides, dtype=float)
     if arr.ndim == 1:
@@ -182,17 +150,6 @@ def classify_triangle_angles(
 ) -> Union[AngleType, np.ndarray]:
     """
     Classify by angles: 'right', 'acute', or 'obtuse'.
-
-    Parameters
-    ----------
-    sides : (3,) or (N,3) array-like
-        Triangle side lengths.
-    tol_deg : float
-        Absolute tolerance in degrees for right-angle detection (default 0.1°).
-
-    Returns
-    -------
-    angle_type : str or (N,) ndarray[str]
     """
     arr = np.asarray(sides, dtype=float)
     if arr.ndim == 1:
@@ -215,19 +172,23 @@ def normalized_side_coords(sides: np.ndarray) -> np.ndarray:
     """
     Map to 2D 'normalized side-space' by fixing the longest side to 1
     and returning (a/c, b/c) with a<=b<=c.
-
-    Parameters
-    ----------
-    sides : (N,3) ndarray
-
-    Returns
-    -------
-    coords : (N,2) ndarray
-        Each row is (a/c, b/c).
     """
     s = np.sort(np.asarray(sides, dtype=float), axis=1)
     a, b, c = s[:, 0], s[:, 1], s[:, 2]
     return np.stack([a / c, b / c], axis=1)
+
+
+def perimeter_normalized_sides(sides: np.ndarray) -> np.ndarray:
+    """
+    Normalize sides by perimeter: return (a/l, b/l, c/l) where l = a + b + c.
+    """
+    s = np.asarray(sides, dtype=float)
+    if s.ndim != 2 or s.shape[1] != 3:
+        raise ValueError("sides must be a (N,3) array")
+    perim = s.sum(axis=1, keepdims=True)
+    if np.any(perim <= 0):
+        raise ValueError("Perimeter must be positive for all rows.")
+    return s / perim
 
 
 def planar_embedding_coords(sides: np.ndarray) -> np.ndarray:
@@ -238,16 +199,6 @@ def planar_embedding_coords(sides: np.ndarray) -> np.ndarray:
       - Place P0 = (0, 0), P1 = (c, 0)
       - Let distances from P2 to P0 and P1 be a and b respectively
       - Then x = (a^2 - b^2 + c^2) / (2c), y = +sqrt(max(a^2 - x^2, 0))
-
-    Parameters
-    ----------
-    sides : (N,3) ndarray
-        Side lengths; order free.
-
-    Returns
-    -------
-    coords : (N,2) ndarray
-        Coordinates (x, y) of the third vertex P2; P0 and P1 are fixed as above.
     """
     s = np.sort(np.asarray(sides, dtype=float), axis=1)
     a, b, c = s[:, 0], s[:, 1], s[:, 2]
@@ -260,14 +211,6 @@ def planar_embedding_coords(sides: np.ndarray) -> np.ndarray:
 def triangle_area(sides: np.ndarray) -> np.ndarray:
     """
     Heron's formula.
-
-    Parameters
-    ----------
-    sides : (N,3) ndarray
-
-    Returns
-    -------
-    area : (N,) ndarray
     """
     s = np.asarray(sides, dtype=float)
     p = s.sum(axis=1) / 2.0
@@ -297,15 +240,7 @@ def _weights_from_biases(
 
 
 def generate_triangle_dataset(
-    n_samples: int = 5_000,
-    side_bias: Optional[Dict[SideType, float]] = None,
-    angle_bias: Optional[Dict[AngleType, float]] = None,
-    seed: Optional[int] = 42,
-    sort_sides: bool = True,
-    oversample_factor: int = 6,
-    include_geometry: bool = True,
-    include_normalized_sides: bool = True,
-    include_planar_embedding: bool = True,
+    parameters: DatasetOptions,
 ) -> pd.DataFrame:
     """
     Generate a dataset of triangle side lengths with optional biases and 2D representations.
@@ -313,40 +248,25 @@ def generate_triangle_dataset(
     The sampling procedure:
       1) Oversample a large valid pool uniformly in (0,1]^3 subject to triangle inequality.
       2) Compute side/angle classes for the pool.
-      3) If biases are provided, compute weights:
-            weight = side_bias[side_type] * angle_bias[angle_type]
-         and sample `n_samples` rows from the pool with probability ∝ weight.
-         If no biases, sample uniformly from the pool.
+      3) If biases are provided, compute weights and sample n_samples rows.
       4) Assemble the final DataFrame with optional geometric features.
-
-    Parameters
-    ----------
-    n_samples : int
-        Number of samples to draw for the final dataset.
-    side_bias : dict | None
-        e.g. {'equilateral': 0.02, 'isosceles': 0.18, 'scalene': 0.80}
-    angle_bias : dict | None
-        e.g. {'right': 0.05, 'acute': 0.70, 'obtuse': 0.25}
-    seed : int | None
-        Seed for reproducibility.
-    sort_sides : bool
-        If True, stored sides are sorted ascending (a <= b <= c).
-    oversample_factor : int
-        Pool size multiplier; pool_size = oversample_factor * n_samples.
-        Increase if your biases are extreme and underrepresented in a modest pool.
-    include_geometry : bool
-        If True, include perimeter, area, and individual angles (degrees).
-    include_normalized_sides : bool
-        If True, include columns 'a_over_c', 'b_over_c'.
-    include_planar_embedding : bool
-        If True, include columns 'x', 'y' for the canonical planar embedding.
 
     Returns
     -------
     df : pandas.DataFrame
         Columns always include: 'a', 'b', 'c', 'side_type', 'angle_type'.
-        Optional columns per flags above.
     """
+    seed = parameters.seed
+    n_samples = parameters.n_samples
+    oversample_factor = parameters.oversample_factor
+    side_bias = parameters.side_bias
+    angle_bias = parameters.angle_bias
+    sort_sides = parameters.sort_sides
+    include_geometry = parameters.include_geometry
+    include_normalized_sides = parameters.include_normalized_sides
+    include_planar_embedding = parameters.include_planar_embedding
+    include_perimeter_normalized_sides = parameters.include_perimeter_normalized_sides
+
     rng = _get_rng(seed)
 
     pool_size = max(n_samples * oversample_factor, n_samples + 1000)
@@ -397,32 +317,217 @@ def generate_triangle_dataset(
         xy = planar_embedding_coords(sides)
         df["x"] = xy[:, 0]
         df["y"] = xy[:, 1]
+    
+    if include_perimeter_normalized_sides:
+        apl = perimeter_normalized_sides(sides)
+        df['a_over_l'] = apl[:, 0]
+        df['b_over_l'] = apl[:, 1]
+        df['c_over_l'] = apl[:, 2]
 
-    # Shuffle for good measure (deterministic via seed)
+    # Deterministic shuffle for the sampling path only
     df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     return df
 
 
-# Convenience aliases mirroring your original API
-def generate_biased_triangle_dataset(
-    n_samples: int = 5_000,
-    side_bias: Optional[Dict[SideType, float]] = None,
-    angle_bias: Optional[Dict[AngleType, float]] = None,
-    seed: Optional[int] = 42,
+# --------------------- Minimal, clean inverse mappers ------------------------
+
+def _mark_validity(sides: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Return per-row masks: finite_mask, pos_mask, tri_mask, valid_mask.
+    """
+    s = np.asarray(sides, dtype=float)
+    finite_mask = np.isfinite(s).all(axis=1)
+    pos_mask = (s > 0).all(axis=1)
+    a, b, c = s[:, 0], s[:, 1], s[:, 2]
+    tri_mask = is_valid_triangle_sides(a, b, c)
+    valid_mask = finite_mask & pos_mask & tri_mask
+    return finite_mask, pos_mask, tri_mask, valid_mask
+
+
+def _add_validity_columns(df: pd.DataFrame, sides: np.ndarray) -> pd.DataFrame:
+    """
+    Adds 'is_valid_triangle' and 'invalid_reason' columns ("" for valid rows).
+    """
+    finite_mask, pos_mask, tri_mask, valid_mask = _mark_validity(sides)
+    df["is_valid_triangle"] = valid_mask
+
+    # Build reasons only for invalid rows
+    reasons = np.full(df.shape[0], "", dtype=object)
+    bad_idx = np.where(~valid_mask)[0]
+    for i in bad_idx:
+        if not finite_mask[i]:
+            reasons[i] = "nan_or_inf"
+        elif not pos_mask[i]:
+            reasons[i] = "non_positive"
+        elif not tri_mask[i]:
+            reasons[i] = "triangle_inequality"
+        else:
+            reasons[i] = "unknown"
+    df["invalid_reason"] = reasons
+    return df
+
+
+def _assemble_dataframe_from_sides(
+    sides: np.ndarray,
+    seed: Optional[int],
+    sort_sides: bool,
+    include_geometry: bool,
+    include_normalized_sides: bool,
+    include_planar_embedding: bool,
+    include_perimeter_normalized_sides: bool,
 ) -> pd.DataFrame:
     """
-    Backwards-compatible wrapper that calls `generate_triangle_dataset` with geometry and 2D features enabled.
+    Build the final DataFrame from a (N,3) sides array using the same column
+    conventions as `generate_triangle_dataset`. No shuffle; preserves order.
+    Also adds validity markers.
     """
-    return generate_triangle_dataset(
-        n_samples=n_samples,
-        side_bias=side_bias,
-        angle_bias=angle_bias,
-        seed=seed,
-        sort_sides=True,
-        oversample_factor=6,
-        include_geometry=True,
-        include_normalized_sides=True,
-        include_planar_embedding=True,
+    s = np.asarray(sides, dtype=float)
+    if s.ndim != 2 or s.shape[1] != 3:
+        raise ValueError("sides must be a (N,3) array")
+
+    # Validity will be computed on the *reconstructed* (unsorted) sides
+    # but we sort for derived features (if requested)
+    base_sides = s.copy()
+
+    if sort_sides:
+        s = np.sort(s, axis=1)
+
+    # Classes
+    st = classify_triangle_sides(s)
+    at = classify_triangle_angles(s)
+
+    df = pd.DataFrame(s, columns=["a", "b", "c"])
+    df["side_type"] = st
+    df["angle_type"] = at
+
+    if include_geometry:
+        ang = triangle_angles_degrees(s)
+        df["angle_A_deg"] = ang[:, 0]
+        df["angle_B_deg"] = ang[:, 1]
+        df["angle_C_deg"] = ang[:, 2]
+        df["perimeter"] = s.sum(axis=1)
+        df["area"] = triangle_area(s)
+
+    if include_normalized_sides:
+        norm = normalized_side_coords(s)
+        df["a_over_c"] = norm[:, 0]
+        df["b_over_c"] = norm[:, 1]
+
+    if include_planar_embedding:
+        xy = planar_embedding_coords(s)
+        df["x"] = xy[:, 0]
+        df["y"] = xy[:, 1]
+
+    if include_perimeter_normalized_sides:
+        apl = perimeter_normalized_sides(s)
+        df["a_over_l"] = apl[:, 0]
+        df["b_over_l"] = apl[:, 1]
+        df["c_over_l"] = apl[:, 2]
+
+    # Mark validity using the original (unsorted) reconstructed sides
+    df = _add_validity_columns(df, base_sides)
+    return df
+
+
+def dataset_from_perimeter_normalized(
+    apl: Union[np.ndarray, list, tuple],
+    perimeter: Union[float, np.ndarray, list, tuple],
+    parameters: DatasetOptions,
+    *,
+    renormalize: bool = True,   # set False if your apl rows already sum to 1 exactly
+) -> pd.DataFrame:
+    """
+    Inverse of perimeter normalization: (a/l, b/l, c/l) + l  -> full dataset.
+    Preserves input order; does not shuffle. Bad samples are marked, not raised.
+    """
+    r = np.asarray(apl, dtype=float)
+    if r.ndim != 2 or r.shape[1] != 3:
+        raise ValueError("apl must be a (N,3) array")
+    if renormalize:
+        sums = r.sum(axis=1, keepdims=True)
+        sums[sums == 0] = 1.0
+        r = r / sums
+
+    l = np.asarray(perimeter, dtype=float)
+    if np.isscalar(l):
+        l = np.full(r.shape[0], float(perimeter), dtype=float)
+    if l.ndim != 1 or l.shape[0] != r.shape[0]:
+        raise ValueError("perimeter must be a scalar or (N,) matching apl length")
+    # Allow non-positive l in marking path? No—scale must be > 0 to be meaningful:
+    if (l <= 0).any():
+        # Mark later; but we need sides array; set negatives to NaN scale to mark invalid.
+        l = np.where(l <= 0, np.nan, l)
+
+    sides = r * l[:, None]
+
+    return _assemble_dataframe_from_sides(
+        sides=sides,
+        seed=parameters.seed,
+        sort_sides=parameters.sort_sides,
+        include_geometry=parameters.include_geometry,
+        include_normalized_sides=parameters.include_normalized_sides,
+        include_planar_embedding=parameters.include_planar_embedding,
+        include_perimeter_normalized_sides=parameters.include_perimeter_normalized_sides,
+    )
+
+
+def dataset_from_side_scaled(
+    ac_bc: Union[np.ndarray, list, tuple],
+    c_values: Union[float, np.ndarray, list, tuple],
+    parameters: DatasetOptions,
+) -> pd.DataFrame:
+    """
+    Inverse of longest-side scaling: (a/c, b/c) + c  -> full dataset.
+    Preserves input order; does not shuffle. Bad samples are marked, not raised.
+    """
+    uv = np.asarray(ac_bc, dtype=float)
+    if uv.ndim != 2 or uv.shape[1] != 2:
+        raise ValueError("ac_bc must be a (N,2) array")
+
+    cs = np.asarray(c_values, dtype=float)
+    if np.isscalar(cs):
+        cs = np.full(uv.shape[0], float(c_values), dtype=float)
+    if cs.ndim != 1 or cs.shape[0] != uv.shape[0]:
+        raise ValueError("c_values must be a scalar or (N,) matching ac_bc length")
+    if (cs <= 0).any():
+        cs = np.where(cs <= 0, np.nan, cs)
+
+    a = uv[:, 0] * cs
+    b = uv[:, 1] * cs
+    c = cs
+    sides = np.stack([a, b, c], axis=1)
+
+    return _assemble_dataframe_from_sides(
+        sides=sides,
+        seed=parameters.seed,
+        sort_sides=parameters.sort_sides,
+        include_geometry=parameters.include_geometry,
+        include_normalized_sides=parameters.include_normalized_sides,
+        include_planar_embedding=parameters.include_planar_embedding,
+        include_perimeter_normalized_sides=parameters.include_perimeter_normalized_sides,
+    )
+
+
+def dataset_from_sides(
+    sides: Union[np.ndarray, list, tuple],
+    parameters: DatasetOptions,
+) -> pd.DataFrame:
+    """
+    Direct build from raw (a,b,c). Preserves input order; does not shuffle.
+    Bad samples are marked, not raised.
+    """
+    s = np.asarray(sides, dtype=float)
+    if s.ndim != 2 or s.shape[1] != 3:
+        raise ValueError("sides must be a (N,3) array")
+
+    return _assemble_dataframe_from_sides(
+        sides=s,
+        seed=parameters.seed,
+        sort_sides=parameters.sort_sides,
+        include_geometry=parameters.include_geometry,
+        include_normalized_sides=parameters.include_normalized_sides,
+        include_planar_embedding=parameters.include_planar_embedding,
+        include_perimeter_normalized_sides=parameters.include_perimeter_normalized_sides,
     )
 
 
@@ -436,6 +541,9 @@ __all__ = [
     "triangle_area",
     "normalized_side_coords",
     "planar_embedding_coords",
+    "perimeter_normalized_sides",
     "generate_triangle_dataset",
-    "generate_biased_triangle_dataset",
+    "dataset_from_perimeter_normalized",
+    "dataset_from_side_scaled",
+    "dataset_from_sides",
 ]

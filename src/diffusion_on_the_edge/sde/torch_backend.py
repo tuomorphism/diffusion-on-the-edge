@@ -183,9 +183,8 @@ def standard_normal_logp(x: Tensor, sigma: float = 1.0) -> Tensor:
 @torch.no_grad()
 def pf_logp_from_x0(
     x0: Tensor,
+    process: TorchProcess,
     score_model: ScoreFnTorch,
-    f_fn: DriftFnTorch,
-    g_fn: DiffusionFnTorch,
     prior_std: float,
     grid: TimeGrid,
     n_probe: int = 1,
@@ -200,6 +199,7 @@ def pf_logp_from_x0(
 
     t_tensor = ts[0].expand(B, 1).clone()
     logp_acc = torch.zeros(B, device=device, dtype=dtype)
+    score_model = score_model.to(device=device, dtype=dtype)
 
     # Hutchinson divergence
     for k in range(dts.numel()):
@@ -210,14 +210,14 @@ def pf_logp_from_x0(
             for _ in range(n_probe):
                 v = torch.randn_like(xx)
                 t_scalar = float(t_tensor[0, 0].item())
-                fpf = _pf_drift(xx, t_tensor, t_scalar, f_fn, g_fn, score_model)
+                fpf = _pf_drift(xx, t_tensor, t_scalar, process.drift, process.diffusion, score_model)
                 inner = (fpf * v).sum()
                 (jtv,) = torch.autograd.grad(inner, xx, create_graph=False)
                 acc = acc + (jtv * v).sum(dim=1)
             div = acc / float(n_probe)
         logp_acc = logp_acc - div * dt
 
-        x = heun_step_pf_ode_torch(x, t_tensor, dt, f_fn, g_fn, score_model)
+        x = heun_step_pf_ode_torch(x, t_tensor, dt, process.drift, process.diffusion, score_model)
         t_tensor = ts[k + 1].expand(B, 1)
 
     logp_T = standard_normal_logp(x, sigma=prior_std)
