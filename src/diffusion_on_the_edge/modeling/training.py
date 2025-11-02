@@ -31,9 +31,7 @@ def train_scorenet(
         model.train()
         running_loss = 0.0
         n_samples = 0
-
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{cfg.epochs}")
-        for batch in pbar:
+        for batch in dataloader:
             optimizer.zero_grad()
 
             x = batch['xt']
@@ -58,7 +56,6 @@ def train_scorenet(
             batch_size = x.size(0)
             running_loss += loss.item() * batch_size
             n_samples += batch_size
-            pbar.set_postfix(loss=running_loss / max(1, n_samples))
 
         epoch_loss = running_loss / max(1, n_samples)
         history.append(epoch_loss)
